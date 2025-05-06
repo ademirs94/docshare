@@ -4,5 +4,7 @@
 
 {% block content %}
     <p>Documento carregado com sucesso!</p>
-    <a href="{% url 'upload' %}">Carregar outro</a>
+    <a class="btn btn-primary" href="{% url 'document_list' %}">Ver Meus Documentos</a>
+    <a class="btn btn-secondary" href="{% url 'upload' %}">Carregar outro</a>
 {% endblock %}
+g

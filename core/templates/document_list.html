@@ -13,9 +13,7 @@
             <th>Nome</th>
             <th>Dono</th>
             <th>Data de Criação</th>
-            {% if user.is_superuser %}
-              <th></th>
-            {% endif %}
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -25,12 +23,13 @@
             <td>{{ doc.filename }}</td>
             <td>{{ doc.owner.username }}</td>
             <td>{{ doc.uploaded_at|date:"Y-m-d H:i" }}</td>
-            {% if user.is_superuser %}
             <td>
+              <a class="btn btn-success" href="{% url 'download_document' doc.id %}">📥 Download</a>
+              {% if user.is_superuser %}
                 <a href="{% url 'delete_document' doc.id %}" class="btn btn-danger"
                    onclick="return confirm('Tens a certeza que queres apagar este documento?');">Apagar</a>
+              {% endif %}
             </td>
-           {% endif %}
         </tr>
         {% empty %}
         <tr>

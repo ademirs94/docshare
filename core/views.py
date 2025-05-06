@@ -151,10 +151,19 @@ def document_list(request):
 
 @login_required
 def download_document(request, document_id):
-    try:
-        doc = Document.objects.get(id=document_id, owner=request.user)
-    except Document.DoesNotExist:
-        raise Http404("Documento não encontrado.")
+    # Verifica se o utilizador é um gestor
+    if request.user.role == 'gestor' or request.user.is_superuser:
+        # Gestores podem ver todos os documentos
+        try:
+            doc = Document.objects.get(id=document_id)
+        except Document.DoesNotExist:
+            raise Http404("Documento não encontrado.")
+    else:
+        # Outros utilizadores veem apenas os seus próprios documentos
+        try:
+            doc = Document.objects.get(id=document_id, owner=request.user)
+        except Document.DoesNotExist:
+            raise Http404("Documento não encontrado.")
 
     # Desencriptar a chave AES do documento
     encrypted_key = doc.encrypted_key  # BinaryField ou base64.decode, conforme guardado

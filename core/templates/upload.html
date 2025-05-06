@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Documento{% endblock %}
+
+{% block content %}
+    <h2>Upload de Documento</h2>
+
+    <p><a class="btn btn-primary" href="{% url 'document_list' %}">Meus Documentos.</a></p>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="btn btn-success" type="submit">Enviar</button>
+    </form>
+{% endblock %}

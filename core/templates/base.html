@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}DocShare{% endblock %}</title>
+    <style>
+      body {
+          font-family: Arial, sans-serif;
+          background-color: #f7f9fc;
+          margin: 15px;
+          padding: 0;
+      }
+
+      header, footer {
+          background-color: #2c3e50;
+          color: white;
+          padding: 1em;
+          text-align: center;
+      }
+
+      main {
+          padding: 2em;
+          max-width: 900px;
+          margin: auto;
+      }
+
+      h1, h2 {
+          color: #2c3e50;
+      }
+
+      table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 1.5em;
+          background-color: white;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      th, td {
+          padding: 12px 15px;
+          text-align: left;
+          border-bottom: 1px solid #ddd;
+      }
+
+      th {
+          background-color: #34495e;
+          color: white;
+      }
+
+      tr:hover {
+          background-color: #f1f1f1;
+      }
+
+      .btn {
+          display: inline-block;
+          padding: 10px 16px;
+          font-size: 14px;
+          font-weight: bold;
+          color: #fff;
+          background-color: #2980b9;
+          border: none;
+          border-radius: 5px;
+          text-decoration: none;
+          cursor: pointer;
+          transition: background-color 0.3s ease;
+      }
+
+      .btn:hover {
+          background-color: #3498db;
+      }
+
+      /* Botão de sucesso (ex: confirmar, guardar) */
+      .btn-success {
+          background-color: #27ae60;
+      }
+
+      .btn-success:hover {
+          background-color: #2ecc71;
+      }
+
+      /* Botão de perigo (ex: eliminar) */
+      .btn-danger {
+          background-color: #c0392b;
+      }
+
+      .btn-danger:hover {
+          background-color: #e74c3c;
+      }
+
+      /* Botão secundário (ex: voltar, cancelar) */
+      .btn-secondary {
+          background-color: #7f8c8d;
+      }
+
+      .btn-secondary:hover {
+          background-color: #95a5a6;
+      }
+
+
+      form {
+          background-color: white;
+          padding: 2em;
+          border-radius: 5px;
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+          margin-top: 2em;
+      }
+
+      input, select, textarea {
+          width: 100%;
+          padding: 10px;
+          margin-top: 8px;
+          margin-bottom: 16px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          box-sizing: border-box;
+      }
+
+      .errorlist {
+          color: red;
+          list-style-type: none;
+          padding: 0;
+      }
+    </style>
+
+</head>
+<body>
+    <h1>DocShare</h1>
+    {% if user.is_authenticated %}
+        <p>Bem-vindo, {{ user.username }} | <a href="{% url 'logout' %}">Logout</a></p>
+    {% endif %}
+    <hr>
+    {% block content %}{% endblock %}
+</body>
+</html>

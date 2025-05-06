@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+    <h2>Iniciar Sessão</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="text" name="username" placeholder="Utilizador">
+      <input type="password" name="password" placeholder="Password">
+      <button class="btn btn-success" type="submit">Entrar</button>
+      {% if error %}<p>{{ error }}</p>{% endif %}
+    </form>
+    <p>Ainda não tens conta? <a href="{% url 'signup' %}">Cria uma!</a></p>
+{% endblock %}

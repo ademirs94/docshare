@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Meus Documentos{% endblock %}
+
+{% block content %}
+
+  <p>
+    <a class="btn btn-primary" href="{% url 'upload' %}">Adicionar Documentos.</a>
+  </p>
+  <table border="1" cellpadding="8" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Nome</th>
+            <th>Dono</th>
+            <th>Data de Criação</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documentos %}
+        <tr>
+            <td>{{ doc.id }}</td>
+            <td>{{ doc.filename }}</td>
+            <td>{{ doc.owner.username }}</td>
+            <td>{{ doc.uploaded_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4">Nenhum documento encontrado.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

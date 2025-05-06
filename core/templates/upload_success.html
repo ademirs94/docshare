@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+
+{% block title %}Sucesso{% endblock %}
+
+{% block content %}
+    <p>Documento carregado com sucesso!</p>
+    <a href="{% url 'upload' %}">Carregar outro</a>
+{% endblock %}

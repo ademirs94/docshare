@@ -1,4 +1,4 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 
 from docshare import settings
@@ -14,6 +14,7 @@ import qrcode
 import qrcode.image.svg
 from io import BytesIO
 import base64
+import os
 
 @login_required
 def upload_document(request):
@@ -70,7 +71,6 @@ def login_view(request):
         password = request.POST['password']
         user = authenticate(request, username=username, password=password)
 
-
         if user is not None:
             request.session['pre_2fa_user_id'] = user.id
             return redirect('verify_totp')
@@ -86,6 +86,9 @@ def verify_totp(request):
 
     user = User.objects.get(id=user_id)
 
+    if not user.totp_secret:
+        return redirect('setup_totp')
+
     if request.method == 'POST':
         code = request.POST.get('code')
         totp = pyotp.TOTP(user.totp_secret)
@@ -100,9 +103,15 @@ def verify_totp(request):
     return render(request, 'verify_totp.html')
 
 
-@login_required
+# @login_required
 def setup_totp(request):
     user = request.user
+    user_id = request.session.get('pre_2fa_user_id')
+    if user_id:
+        user = User.objects.get(id=user_id)
+        if not user:
+            return redirect('login')
+
     if not user.totp_secret:
         user.generate_totp_secret()
 
@@ -161,3 +170,16 @@ def download_document(request, document_id):
     response = HttpResponse(decrypted_data, content_type='application/octet-stream')
     response['Content-Disposition'] = f'attachment; filename="{doc.filename}"'
     return response
+
+
+@login_required
+def delete_document(request, document_id):
+    doc = get_object_or_404(Document, id=document_id)
+
+    if request.user.is_superuser:
+        if doc.encrypted_file and os.path.isfile(doc.encrypted_file.path):
+            os.remove(doc.encrypted_file.path)
+        doc.delete()
+
+
+    return redirect('document_list')

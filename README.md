@@ -1,5 +1,13 @@
 # Docshare
 
+## Projeto académico sobre Sistemas de Segurança na Informação.
+O ambito deste projeto é de criar uma aplicação que suporte forte autenticação de utilizadores, com tecnologia TOTP para providenciar autenticação com 2 Fatores.
+Carregar e encriptar ficheiros de forma segura garantindo a sua confidencialidade.
+A encriptação é feita com algoritmo AES-256 com uma Key (32Bytes) auto gerada e novamente encriptada para cada ficheiro.
+No download a Key é novamente decriptada e posteriormente usada para decriptar os dados do ficheiro.
+As Keys de ficheiros são encriptadas com uma outra MASTER_KEY que é configurada ao nivel da aplicação.
+
+
 ## 📦 Manual de Instalação
 
 ### 1. Requisitos Mínimos

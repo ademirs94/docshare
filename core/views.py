@@ -20,34 +20,59 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 
-@login_required
+@api_view(['POST'])
 def upload_document(request):
-    if request.method == 'POST':
-        form = DocumentUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            file_data = request.FILES['file'].read()
-            key, encrypted = encrypt_file(file_data)
+    # Obtém o user_id do formulário
+    user_id = request.POST.get('user_id')
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            # Encripta a chave com a chave mestra
-            encrypted_key = encrypt_key(key, settings.MASTER_KEY)
+    # Verifica se há arquivo no request
+    if 'file' not in request.FILES:
+        return Response({'detail': 'Missing file'}, status=status.HTTP_400_BAD_REQUEST)
 
-            doc = Document.objects.create(
-                owner=request.user,
-                filename=request.FILES['file'].name,
-                encrypted_file=None,
-                encrypted_key=encrypted_key,
-            )
+    try:
+        # Lê os dados do arquivo
+        file_obj = request.FILES['file']
+        file_data = file_obj.read()
 
-            path = f'uploads_encrypted/doc_{doc.id}.bin'
-            with open(path, 'wb') as f:
-                f.write(encrypted)
+        # Encripta o arquivo
+        key, encrypted = encrypt_file(file_data)
 
-            doc.encrypted_file.name = f'doc_{doc.id}.bin'
-            doc.save()
-            return redirect('upload_success')
-    else:
-        form = DocumentUploadForm()
-    return render(request, 'upload.html', {'form': form})
+        # Encripta a chave com a chave mestra
+        encrypted_key = encrypt_key(key, settings.MASTER_KEY)
+
+        # Cria o documento no banco de dados
+        doc = Document.objects.create(
+            owner=user,
+            filename=file_obj.name,
+            encrypted_file=None,
+            encrypted_key=encrypted_key,
+        )
+
+        # Salva o arquivo encriptado no disco
+        path = f'uploads_encrypted/doc_{doc.id}.bin'
+        with open(path, 'wb') as f:
+            f.write(encrypted)
+
+        # Atualiza o caminho do arquivo no documento
+        doc.encrypted_file.name = f'doc_{doc.id}.bin'
+        doc.save()
+
+        return Response({
+            'id': doc.id,
+            'filename': doc.filename,
+            'owner': doc.owner.username,
+            'uploaded_at': doc.uploaded_at,
+            'detail': 'File uploaded successfully'
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({'detail': f'Error uploading file: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
@@ -183,17 +208,37 @@ def setup_totp(request):
     )
 
 
-@login_required
-def document_list(request):
-    # Verifica se o utilizador é um gestor
-    if request.user.role == 'gestor' or request.user.is_superuser:
-        # Gestores podem ver todos os documentos
-        documentos = Document.objects.all()
-    else:
-        # Outros utilizadores veem apenas os seus próprios documentos
-        documentos = Document.objects.filter(owner=request.user)
+@api_view(['GET'])
+def user_document_list(request):
+    # Obtém o user_id da query string
+    user_id = request.query_params.get('user_id')
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-    return render(request, 'document_list.html', {'documentos': documentos})
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Obtém apenas os documentos do utilizador
+    documentos = Document.objects.filter(owner=user)
+
+    # Serializa os documentos
+    documentos_data = [
+        {
+            'id': doc.id,
+            'filename': doc.filename,
+            'uploaded_at': doc.uploaded_at,
+            'owner': doc.owner.username,
+        }
+        for doc in documentos
+    ]
+
+    return Response({
+        'user': user.username,
+        'documents': documentos_data,
+        'count': len(documentos_data)
+    }, status=status.HTTP_200_OK)
 
 
 

@@ -51,19 +51,43 @@ def upload_document(request):
 
 
 
-
+@api_view(['POST'])
 def signup(request):
-    if request.method == 'POST':
-        form = SignUpForm(request.POST)
-        if form.is_valid():
-            user = form.save(commit=False)
-            user.generate_totp_secret()
-            user.save()
-            login(request, user)
-            return redirect('setup_totp')
-    else:
-        form = SignUpForm()
-    return render(request, 'signup.html', {'form': form})
+    # if request.method == 'POST':
+    print(request.data)
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+    name = request.data.get('name')
+    first_name = name.split(' ')[0] if name else ''
+    last_name = ' '.join(name.split(' ')[1:]) if name and len(name.split(' ')) > 1 else ''
+
+    if not username or not email or not password:
+        return Response({'detail': 'Missing required fields'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'detail': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(email=email).exists():
+        return Response({'detail': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(
+        username=username,
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=last_name
+    )
+    # user.generate_totp_secret()
+    user.save()
+
+    return Response({
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'name': user.first_name + ' ' + user.last_name,
+    }, status=status.HTTP_201_CREATED)
+
 
 def logout_view(request):
     logout(request)
@@ -126,10 +150,10 @@ def verify_totp(request):
 
 
 
-# @login_required
+@api_view(['POST'])
 def setup_totp(request):
-    user = request.user
-    user_id = request.session.get('pre_2fa_user_id')
+    user_id = request.data.get('user_id')
+    user = None
     if user_id:
         user = User.objects.get(id=user_id)
         if not user:
@@ -143,7 +167,6 @@ def setup_totp(request):
     img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgImage)
     buffer = BytesIO()
     img.save(buffer)
-    svg = buffer.getvalue().decode()
 
     # Geração da imagem em PNG e conversão para base64
     qr = qrcode.make(uri)
@@ -151,11 +174,13 @@ def setup_totp(request):
     qr.save(buffer, format='PNG')
     qr_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-    return render(request, 'setup_totp.html', {
-        'svg': svg,
-        'qr_base64': qr_base64,
-        'secret': user.totp_secret
-    })
+    return Response(
+        {
+            'qr_base64': qr_base64,
+            'secret': user.totp_secret
+        },
+        status=status.HTTP_200_OK
+    )
 
 
 @login_required

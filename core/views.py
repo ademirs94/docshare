@@ -16,6 +16,10 @@ from io import BytesIO
 import base64
 import os
 
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.decorators import api_view
+
 @login_required
 def upload_document(request):
     if request.method == 'POST':
@@ -65,42 +69,61 @@ def logout_view(request):
     logout(request)
     return redirect('login')
 
+@api_view(['POST'])
 def login_view(request):
-    if request.method == 'POST':
-        username = request.POST['username']
-        password = request.POST['password']
-        user = authenticate(request, username=username, password=password)
+    # Com Django REST Framework, use request.data (funciona para JSON e form-data)
+    username = request.data.get('username')
+    password = request.data.get('password')
 
-        if user is not None:
-            request.session['pre_2fa_user_id'] = user.id
-            return redirect('verify_totp')
-        else:
-            return render(request, 'login.html', {'error': 'Credenciais inválidas.'})
-    return render(request, 'login.html')
+    if not username or not password:
+        return Response({'detail': 'Missing username or password'}, status=status.HTTP_400_BAD_REQUEST)
 
+    user = authenticate(request, username=username, password=password)
+    if user is not None:
+        request.session['pre_2fa_user_id'] = user.id
+        return Response({
+            'id': user.id,
+            'requires2FA': bool(user.totp_secret),
+        })
+        # return Response({
+        #     'id': user.id,
+        #     'username': user.username,
+        #     'name': user.first_name + ' ' + user.last_name,
+        #     'email': user.email,
+        # })
+    return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+# ...existing code...
 
+@api_view(['POST'])
 def verify_totp(request):
-    user_id = request.session.get('pre_2fa_user_id')
+    user_id = request.data.get('userId')
     if not user_id:
-        return redirect('login')
+        return Response({'detail': 'Missing userId'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = User.objects.get(id=user_id)
 
     if not user.totp_secret:
-        return redirect('setup_totp')
+        return Response({
+            'setup2FA': True,
+            'detail': 'User is not enrolled in 2FA'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
-    if request.method == 'POST':
-        code = request.POST.get('code')
-        totp = pyotp.TOTP(user.totp_secret)
-        print(code)
-        if totp.verify(code):
-            login(request, user)
-            del request.session['pre_2fa_user_id']
-            return redirect('document_list')  # ou a tua página principal
-        else:
-            return render(request, 'verify_totp.html', {'error': 'Código TOTP inválido.'})
+    code = request.data.get('code')
+    totp = pyotp.TOTP(user.totp_secret)
+    print(code)
+    if totp.verify(code):
+        # login(request, user)
+        # del request.session['pre_2fa_user_id']
+        # return redirect('document_list')  # ou a tua página principal
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'name': user.first_name + ' ' + user.last_name,
+            'email': user.email,
+        })
+    else:
+        return Response({'error': 'Código TOTP inválido.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    return render(request, 'verify_totp.html')
 
 
 # @login_required

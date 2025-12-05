@@ -30,7 +30,7 @@ ALLOWED_HOSTS = []
 
 # Application definition
 AUTH_USER_MODEL = 'core.User'
-MEDIA_ROOT = BASE_DIR / 'uploads_encrypted'
+MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = '/media/'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/upload/'

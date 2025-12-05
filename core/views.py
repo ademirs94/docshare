@@ -1,13 +1,10 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect
 
 from docshare import settings
-from .forms import DocumentUploadForm
 from .models import Document, User
-from .forms import SignUpForm
-from django.contrib.auth import login, authenticate, logout
+from django.contrib.auth import authenticate, logout
 
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
 import pyotp
 import qrcode
@@ -242,46 +239,75 @@ def user_document_list(request):
 
 
 
-@login_required
+@api_view(['GET'])
 def download_document(request, document_id):
-    # Verifica se o utilizador é um gestor
-    if request.user.role == 'gestor' or request.user.is_superuser:
-        # Gestores podem ver todos os documentos
-        try:
-            doc = Document.objects.get(id=document_id)
-        except Document.DoesNotExist:
-            raise Http404("Documento não encontrado.")
-    else:
-        # Outros utilizadores veem apenas os seus próprios documentos
-        try:
-            doc = Document.objects.get(id=document_id, owner=request.user)
-        except Document.DoesNotExist:
-            raise Http404("Documento não encontrado.")
+    # Obtém o user_id da query string
+    user_id = request.query_params.get('user_id')
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Desencriptar a chave AES do documento
-    encrypted_key = doc.encrypted_key  # BinaryField ou base64.decode, conforme guardado
-    aes_key = decrypt_key(encrypted_key, settings.MASTER_KEY)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Ler o ficheiro encriptado
-    with open(doc.encrypted_file.path, 'rb') as f:
-        encrypted_data = f.read()
+    # Verifica se quer o ficheiro encriptado ou decriptado
+    encrypted = request.query_params.get('encrypted', 'false').lower() == 'true'
 
-    # Desencriptar o ficheiro com a chave obtida
-    decrypted_data = decrypt_file(encrypted_data, aes_key)
+    try:
+        doc = Document.objects.get(id=document_id, owner=user)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    response = HttpResponse(decrypted_data, content_type='application/octet-stream')
-    response['Content-Disposition'] = f'attachment; filename="{doc.filename}"'
-    return response
+    try:
+        # Ler o ficheiro encriptado
+        with open(doc.encrypted_file.path, 'rb') as f:
+            encrypted_data = f.read()
+
+        if encrypted:
+            # Retorna o ficheiro encriptado
+            response = HttpResponse(encrypted_data, content_type='application/octet-stream')
+            response['Content-Disposition'] = f'attachment; filename="{doc.filename}.encrypted"'
+        else:
+            # Desencriptar a chave AES do documento
+            aes_key = decrypt_key(doc.encrypted_key, settings.MASTER_KEY)
+            # Desencriptar o ficheiro
+            decrypted_data = decrypt_file(encrypted_data, aes_key)
+            response = HttpResponse(decrypted_data, content_type='application/octet-stream')
+            response['Content-Disposition'] = f'attachment; filename="{doc.filename}"'
+
+        return response
+
+    except Exception as e:
+        return Response({'detail': f'Error downloading file: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@login_required
+@api_view(['DELETE'])
 def delete_document(request, document_id):
-    doc = get_object_or_404(Document, id=document_id)
+    # Obtém o user_id da query string
+    user_id = request.query_params.get('user_id')
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if request.user.is_superuser:
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id, owner=user)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        # Remove o ficheiro encriptado do disco
         if doc.encrypted_file and os.path.isfile(doc.encrypted_file.path):
             os.remove(doc.encrypted_file.path)
+
+        # Remove o documento da base de dados
         doc.delete()
 
+        return Response({'detail': 'Document deleted successfully'}, status=status.HTTP_200_OK)
 
-    return redirect('document_list')
+    except Exception as e:
+        return Response({'detail': f'Error deleting document: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,8 +1,10 @@
 from django.shortcuts import redirect
 
 from docshare import settings
-from .models import Document, User
-from django.contrib.auth import authenticate, logout
+from .forms import DocumentUploadForm
+from .models import Document, User, Group, GroupMember
+from .forms import SignUpForm
+from django.contrib.auth import login, authenticate, logout
 
 from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
@@ -12,6 +14,9 @@ import qrcode.image.svg
 from io import BytesIO
 import base64
 import os
+import uuid
+
+from django.core.files.storage import default_storage
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -157,10 +162,7 @@ def verify_totp(request):
     code = request.data.get('code')
     totp = pyotp.TOTP(user.totp_secret)
     print(code)
-    if totp.verify(code):
-        # login(request, user)
-        # del request.session['pre_2fa_user_id']
-        # return redirect('document_list')  # ou a tua página principal
+    if totp.verify(code, valid_window=1):
         return Response({
             'id': user.id,
             'username': user.username,
@@ -311,3 +313,129 @@ def delete_document(request, document_id):
 
     except Exception as e:
         return Response({'detail': f'Error deleting document: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def create_group(request):
+    """Criar um novo grupo"""
+    user_id = request.POST.get('user_id')
+    user = User.objects.get(id=user_id)
+    if not user:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    print(user_id)
+    name = request.POST.get('name')
+    description = request.POST.get('description', '')
+    category = request.POST.get('category', '')
+    image_file = request.FILES.get('image')  # Recebe blob como arquivo
+
+    if not name:
+        return Response({'detail': 'Group name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    print(name)
+    image_path = None
+    
+    # Processar imagem se fornecida
+    if image_file:
+        try:
+            # Gerar nome único para a imagem
+            file_ext = image_file.name.split('.')[-1] if '.' in image_file.name else 'png'
+            unique_filename = f'group_{uuid.uuid4()}.{file_ext}'
+            image_path = f'groups/{unique_filename}'
+            
+            # Guardar ficheiro na pasta media
+            default_storage.save(image_path, image_file)
+        except Exception as e:
+            return Response({'detail': f'Error uploading image: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+    print("image uploaded")
+    # Criar grupo
+    group = Group.objects.create(
+        name=name,
+        description=description,
+        category=category,
+        image=image_path,  # Guardar apenas o caminho
+        created_by=user
+    )
+
+    # Adicionar o owner como administrador
+    GroupMember.objects.create(
+        group=group,
+        user=user,
+        role='admin'
+    )
+
+    # Construir resposta com membros e roles
+    members_list = GroupMember.objects.filter(group=group).select_related('user')
+    
+    return Response({
+        'id': group.id,
+        'name': group.name,
+        'description': group.description,
+        'category': group.category,
+        'image': image_path,
+        'created_by': group.created_by.username,
+        'created_date': group.created_date,
+        'members_count': members_list.count(),
+        'membersList': [{
+            'id': gm.user.id, 
+            'username': gm.user.username, 
+            'name': gm.user.get_full_name(),
+            'role': gm.role
+        } for gm in members_list],
+        'isAdmin': True
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def get_groups(request, user_id):
+    """Listar grupos onde o user é owner ou member"""
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Obter todos os grupos
+    all_groups = Group.objects.all()
+    
+    # Filtrar grupos onde o user é owner ou member
+    user_groups = []
+    for group in all_groups:
+        is_owner = group.created_by == user
+        is_member = GroupMember.objects.filter(group=group, user=user).exists()
+        
+        if is_owner or is_member:
+            user_groups.append(group)
+    
+    data = []
+    for group in user_groups:
+        memberList = GroupMember.objects.filter(group=group).select_related('user')
+        image_url = None
+        if group.image:
+            # Construir URL completa da imagem
+            image_url = f'/media/{group.image}'
+        
+        # Verificar se o utilizador é admin do grupo
+        is_admin = GroupMember.objects.filter(
+            group=group, 
+            user=user, 
+            role='admin'
+        ).exists() or group.created_by == user
+        
+        data.append({
+            'id': group.id,
+            'name': group.name,
+            'description': group.description,
+            'category': group.category,
+            'image': image_url,
+            'createdBy': group.created_by.username,
+            'createdDate': group.created_date.isoformat(),
+            'members_count': memberList.count(),
+            'memberList': [{
+                'id': gm.user.id,
+                'username': gm.user.username,
+                'name': gm.user.get_full_name(),
+                'role': gm.role
+            } for gm in memberList],
+            'isAdmin': is_admin
+        })
+    return Response(data, status=status.HTTP_200_OK)

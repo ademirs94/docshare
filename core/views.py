@@ -1,11 +1,7 @@
 from django.shortcuts import redirect
-
 from docshare import settings
-from .forms import DocumentUploadForm
 from .models import Document, User, Group, GroupMember
-from .forms import SignUpForm
 from django.contrib.auth import login, authenticate, logout
-
 from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
 import pyotp
@@ -24,14 +20,33 @@ from rest_framework.decorators import api_view
 
 @api_view(['POST'])
 def upload_document(request):
-    # Obtém o user_id do formulário
+    # Obtém o user_id e group_id do formulário
     user_id = request.POST.get('user_id')
-    if not user_id:
-        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    group_id = request.POST.get('group_id')
+
+    # Valida que apenas um dos dois foi fornecido
+    if user_id and group_id:
+        return Response({'detail': 'Cannot specify both user_id and group_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not user_id and not group_id:
+        return Response({'detail': 'Missing user_id or group_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = None
+    group = None
+
+    if user_id:
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if group_id:
+        try:
+            group = Group.objects.get(id=group_id)
+            # O owner será o criador do grupo
+            user = group.created_by
+        except Group.DoesNotExist:
+            return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
 
     # Verifica se há arquivo no request
     if 'file' not in request.FILES:
@@ -54,6 +69,7 @@ def upload_document(request):
             filename=file_obj.name,
             encrypted_file=None,
             encrypted_key=encrypted_key,
+            shared_in_group=group,  # Será None se for upload pessoal
         )
 
         # Salva o arquivo encriptado no disco
@@ -70,6 +86,8 @@ def upload_document(request):
             'filename': doc.filename,
             'owner': doc.owner.username,
             'uploaded_at': doc.uploaded_at,
+            'group_id': doc.shared_in_group.id if doc.shared_in_group else None,
+            'group_name': doc.shared_in_group.name if doc.shared_in_group else None,
             'detail': 'File uploaded successfully'
         }, status=status.HTTP_201_CREATED)
 

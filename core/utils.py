@@ -29,9 +29,3 @@ def decrypt_key(encrypted_key, master_key):
     cipher = Cipher(algorithms.AES(master_key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     return decryptor.update(encrypted_key[16:]) + decryptor.finalize()
-
-# def decrypt_file(path):
-#     with open(path, 'rb') as f:
-#         encrypted_data = f.read()
-#     fernet = Fernet(settings.ENCRYPTION_KEY)
-#     return fernet.decrypt(encrypted_data)

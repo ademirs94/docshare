@@ -2,11 +2,6 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 import pyotp
 
-USER_ROLES = [
-    ('colaborador', 'Colaborador'),
-    ('gestor', 'Gestor'),
-]
-
 GROUP_MEMBER_ROLES = [
     ('membro', 'Membro'),
     ('admin', 'Administrador'),
@@ -14,7 +9,6 @@ GROUP_MEMBER_ROLES = [
 ]
 
 class User(AbstractUser):
-    role = models.CharField(max_length=20, choices=USER_ROLES, default='colaborador')
     totp_secret = models.CharField(max_length=32, blank=True, null=True)
 
     def get_totp_uri(self):
@@ -31,6 +25,8 @@ class Document(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     encrypted_file = models.FileField(upload_to='uploads_encrypted/')
     encrypted_key = models.BinaryField()
+    shared_in_group = models.ForeignKey('Group', on_delete=models.CASCADE, blank=True, null=True)
+    shared_with_user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True, related_name='shared_documents')
 
 class Group(models.Model):
     name = models.CharField(max_length=255)

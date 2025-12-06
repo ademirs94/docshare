@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.urls import path
-from .views import (upload_document, signup, logout_view,
+from .views import (upload_document, signup,
                     user_document_list, download_document,
                     login_view, verify_totp, setup_totp, delete_document,
                     create_group, get_groups, list_users, update_user_profile, get_user_profile, request_group_access, get_access_requests,

@@ -1,9 +1,12 @@
 from django.shortcuts import redirect
 from docshare import settings
-from .models import Document, User, Group, GroupMember
+from .forms import DocumentUploadForm
+from .models import Document, User, Group, GroupMember, RequestAccess
+from .forms import SignUpForm
 from django.contrib.auth import login, authenticate, logout
 from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
+from django.db.models import Q
 import pyotp
 import qrcode
 import qrcode.image.svg
@@ -11,6 +14,7 @@ from io import BytesIO
 import base64
 import os
 import uuid
+from datetime import datetime
 
 from django.core.files.storage import default_storage
 
@@ -429,7 +433,7 @@ def create_group(request):
 
 @api_view(['GET'])
 def get_groups(request, user_id):
-    """Listar grupos onde o user é owner ou member"""
+    """Listar todos os grupos com isAdmin baseado no user_id"""
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -438,17 +442,8 @@ def get_groups(request, user_id):
     # Obter todos os grupos
     all_groups = Group.objects.all()
     
-    # Filtrar grupos onde o user é owner ou member
-    user_groups = []
-    for group in all_groups:
-        is_owner = group.created_by == user
-        is_member = GroupMember.objects.filter(group=group, user=user).exists()
-        
-        if is_owner or is_member:
-            user_groups.append(group)
-    
     data = []
-    for group in user_groups:
+    for group in all_groups:
         memberList = GroupMember.objects.filter(group=group).select_related('user')
         image_url = None
         if group.image:
@@ -474,6 +469,7 @@ def get_groups(request, user_id):
             'memberList': [{
                 'id': gm.user.id,
                 'username': gm.user.username,
+                'email': gm.user.email,
                 'name': gm.user.get_full_name(),
                 'role': gm.role
             } for gm in memberList],
@@ -504,3 +500,281 @@ def list_users(request):
         'count': len(users_data)
     }, status=status.HTTP_200_OK)
 
+
+
+@api_view(['POST'])
+def request_group_access(request):
+    """Criar um pedido de acesso a um grupo"""
+    user_id = request.data.get('user_id')
+    group_id = request.data.get('group_id')
+    message = request.data.get('message', '')
+
+    if not user_id or not group_id:
+        return Response({'detail': 'User ID and Group ID are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        group = Group.objects.get(id=group_id)
+    except Group.DoesNotExist:
+        return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se já é membro
+    is_member = GroupMember.objects.filter(group=group, user=user).exists()
+    if is_member:
+        return Response({'detail': 'User is already a member'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar se já tem um pedido pendente
+    pending_request = RequestAccess.objects.filter(
+        group=group, 
+        user=user, 
+        status='pending'
+    ).first()
+    
+    if pending_request:
+        return Response({'detail': 'Request already pending'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar se há um pedido rejeitado
+    rejected_request = RequestAccess.objects.filter(
+        group=group, 
+        user=user, 
+        status='rejected'
+    ).first()
+
+    if rejected_request:
+        # Alterar o pedido rejeitado para pending
+        rejected_request.status = 'pending'
+        rejected_request.requested_date = datetime.now()
+        rejected_request.responded_date = None
+        rejected_request.message = message
+        rejected_request.save()
+        request_obj = rejected_request
+    else:
+        # Criar novo pedido
+        request_obj = RequestAccess.objects.create(
+            user=user,
+            group=group,
+            message=message
+        )
+
+    return Response({
+        'id': request_obj.id,
+        'user': user.username,
+        'group': group.name,
+        'status': request_obj.status,
+        'requested_date': request_obj.requested_date.isoformat(),
+        'message': request_obj.message
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def get_access_requests(request, user_id):
+    """Listar pedidos de acesso pendentes de todos os grupos onde o user é admin"""
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Obter grupos onde o user é admin ou owner
+    admin_groups = Group.objects.filter(
+        Q(created_by=user) | 
+        Q(group_members__user=user, group_members__role='admin')
+    ).distinct()
+
+    # Obter pedidos pendentes desses grupos
+    requests_list = RequestAccess.objects.filter(
+        group__in=admin_groups,
+        status='pending'
+    ).select_related('user', 'group')
+
+    data = []
+    for req in requests_list:
+        data.append({
+            'id': req.id,
+            'group_id': req.group.id,
+            'group_name': req.group.name,
+            'user_id': req.user.id,
+            'username': req.user.username,
+            'user_email': req.user.email,
+            'user_name': req.user.get_full_name(),
+            'status': req.status,
+            'requested_date': req.requested_date.isoformat(),
+            'responded_date': req.responded_date.isoformat() if req.responded_date else None,
+            'message': req.message
+        })
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def respond_access_request(request, request_id):
+    """Responder a um pedido de acesso (aprovar ou rejeitar)"""
+    user_id = request.data.get('user_id')
+    action = request.data.get('action')  # 'approve' ou 'reject'
+
+    if not user_id:
+        return Response({'detail': 'User ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action not in ['approve', 'reject']:
+        return Response({'detail': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        access_request = RequestAccess.objects.get(id=request_id)
+    except RequestAccess.DoesNotExist:
+        return Response({'detail': 'Request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    group = access_request.group
+
+    # Verificar se o utilizador é admin do grupo
+    is_admin = GroupMember.objects.filter(
+        group=group, 
+        user=user, 
+        role='admin'
+    ).exists() or group.created_by == user
+
+    if not is_admin:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    if access_request.status != 'pending':
+        return Response({'detail': 'Request already responded'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == 'approve':
+        # Adicionar user como membro
+        GroupMember.objects.create(
+            group=group,
+            user=access_request.user,
+            role='membro'
+        )
+        access_request.status = 'approved'
+    else:
+        access_request.status = 'rejected'
+
+    access_request.responded_date = datetime.now()
+    access_request.save()
+
+    return Response({
+        'id': access_request.id,
+        'status': access_request.status,
+        'responded_date': access_request.responded_date.isoformat()
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT'])
+def update_member_role(request, group_id):
+    """Alterar a role de um membro do grupo"""
+    user_id = request.data.get('user_id')
+    member_id = request.data.get('member_id')
+    new_role = request.data.get('role')
+
+    if not user_id or not member_id or not new_role:
+        return Response({'detail': 'User ID, Member ID and Role are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if new_role not in ['membro', 'admin', 'moderador']:
+        return Response({'detail': 'Invalid role'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        group = Group.objects.get(id=group_id)
+    except Group.DoesNotExist:
+        return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador é admin do grupo
+    is_admin = GroupMember.objects.filter(
+        group=group, 
+        user=user, 
+        role='admin'
+    ).exists() or group.created_by == user
+
+    if not is_admin:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        member_user = User.objects.get(id=member_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        group_member = GroupMember.objects.get(group=group, user=member_user)
+    except GroupMember.DoesNotExist:
+        return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Atualizar a role
+    group_member.role = new_role
+    group_member.save()
+
+    return Response({
+        'id': group_member.id,
+        'user_id': group_member.user.id,
+        'username': group_member.user.username,
+        'group_id': group_member.group.id,
+        'group_name': group_member.group.name,
+        'role': group_member.role,
+        'joined_date': group_member.joined_date.isoformat()
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+def remove_group_member(request, group_id):
+    """Remover um membro do grupo (admin ou o próprio utilizador)"""
+    user_id = request.data.get('user_id')
+    member_id = request.data.get('member_id')
+
+    if not user_id or not member_id:
+        return Response({'detail': 'User ID and Member ID are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        group = Group.objects.get(id=group_id)
+    except Group.DoesNotExist:
+        return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        member_user = User.objects.get(id=member_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        group_member = GroupMember.objects.get(group=group, user=member_user)
+    except GroupMember.DoesNotExist:
+        return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Evitar remover o owner do grupo
+    if group.created_by == member_user:
+        return Response({'detail': 'Cannot remove the group owner'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar permissões: user_id é admin OU user_id é o próprio membro a ser removido
+    is_admin = GroupMember.objects.filter(
+        group=group, 
+        user=user, 
+        role='admin'
+    ).exists() or group.created_by == user
+
+    is_removing_self = int(user_id) == int(member_id)
+
+    if not is_admin and not is_removing_self:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Remover o membro
+    group_member.delete()
+
+    return Response({
+        'detail': 'Member removed successfully',
+        'group_id': group.id,
+        'member_id': member_id
+    }, status=status.HTTP_200_OK)

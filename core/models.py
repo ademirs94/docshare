@@ -55,3 +55,26 @@ class GroupMember(models.Model):
 
     def __str__(self):
         return f'{self.user.username} - {self.group.name} ({self.role})'
+
+
+REQUEST_STATUS = [
+    ('pending', 'Pendente'),
+    ('approved', 'Aprovado'),
+    ('rejected', 'Rejeitado'),
+]
+
+
+class RequestAccess(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='access_requests')
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='access_requests')
+    status = models.CharField(max_length=20, choices=REQUEST_STATUS, default='pending')
+    requested_date = models.DateTimeField(auto_now_add=True)
+    responded_date = models.DateTimeField(blank=True, null=True)
+    message = models.TextField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('user', 'group')
+        ordering = ['-requested_date']
+
+    def __str__(self):
+        return f'{self.user.username} - {self.group.name} ({self.status})'

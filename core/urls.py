@@ -3,7 +3,8 @@ from django.urls import path
 from .views import (upload_document, signup, logout_view,
                     user_document_list, download_document,
                     login_view, verify_totp, setup_totp, delete_document,
-                    create_group, get_groups, list_users)
+                    create_group, get_groups, list_users, request_group_access, get_access_requests,
+                    respond_access_request, update_member_role, remove_group_member)
 
 from django.contrib.auth import views as auth_views
 
@@ -23,5 +24,10 @@ urlpatterns = [
     path('groups/create/', create_group, name='create_group'),
     path('groups/<int:user_id>/', get_groups, name='get_groups'),
     path('users/', list_users, name='list_users'),
+    path('groups/request/', request_group_access, name='request_group_access'),
+    path('groups/requests/<int:user_id>/', get_access_requests, name='get_access_requests'),
+    path('groups/requests/<int:request_id>/respond/', respond_access_request, name='respond_access_request'),
+    path('groups/<int:group_id>/members/role/', update_member_role, name='update_member_role'),
+    path('groups/<int:group_id>/member/', remove_group_member, name='remove_group_member'),
 
 ]

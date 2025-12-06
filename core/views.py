@@ -547,6 +547,135 @@ def list_users(request):
     }, status=status.HTTP_200_OK)
 
 
+@api_view(['GET'])
+def get_user_profile(request, user_id):
+    """Obter perfil do utilizador"""
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se existe avatar
+    avatar_url = None
+    avatar_dir = os.path.join('media', 'avatars')
+    allowed_extensions = ['jpg', 'jpeg', 'png']
+    for ext in allowed_extensions:
+        avatar_path = os.path.join(avatar_dir, f'{user.id}.{ext}')
+        if os.path.isfile(avatar_path):
+            avatar_url = f'/media/avatars/{user.id}.{ext}'
+            break
+
+    return Response({
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'name': user.get_full_name(),
+        'avatar': avatar_url
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT'])
+def update_user_profile(request):
+    """Atualizar perfil do utilizador: avatar, nomes e password"""
+    user_id = request.data.get('user_id')
+
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # ========== Atualizar avatar ==========
+    avatar_url = None
+    if 'avatar' in request.FILES:
+        try:
+            avatar_file = request.FILES['avatar']
+
+            # Validar extensão do ficheiro
+            allowed_extensions = ['jpg', 'jpeg', 'png']
+            file_ext = avatar_file.name.split('.')[-1].lower()
+
+            if file_ext not in allowed_extensions:
+                return Response({'detail': 'Only JPG and PNG files are allowed'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Criar pasta se não existir
+            avatar_dir = os.path.join('media', 'avatars')
+            os.makedirs(avatar_dir, exist_ok=True)
+
+            # Guardar ficheiro com nome {user_id}.{extensão}
+            avatar_path = os.path.join(avatar_dir, f'{user.id}.{file_ext}')
+
+            # Remover avatar antigo se existir (qualquer extensão)
+            for ext in allowed_extensions:
+                old_path = os.path.join(avatar_dir, f'{user.id}.{ext}')
+                if os.path.isfile(old_path):
+                    os.remove(old_path)
+
+            # Guardar novo avatar
+            with open(avatar_path, 'wb') as f:
+                for chunk in avatar_file.chunks():
+                    f.write(chunk)
+
+            avatar_url = f'/media/avatars/{user.id}.{file_ext}'
+        except Exception as e:
+            return Response({'detail': f'Error uploading avatar: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ========== Atualizar nomes e email ==========
+    first_name = request.data.get('first_name')
+    last_name = request.data.get('last_name')
+    email = request.data.get('email')
+
+    if first_name:
+        user.first_name = first_name
+    if last_name:
+        user.last_name = last_name
+    if email:
+        # Validar se o email já existe
+        if User.objects.filter(email=email).exclude(id=user.id).exists():
+            return Response({'detail': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+        user.email = email
+
+    # ========== Atualizar password ==========
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+
+    if current_password and new_password:
+        # Verificar se a password atual está correta
+        if not user.check_password(current_password):
+            return Response({'detail': 'Current password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Atualizar password
+        user.set_password(new_password)
+
+    # Guardar alterações
+    user.save()
+
+    # Se não foi enviado avatar, verificar se existe
+    if not avatar_url:
+        avatar_dir = os.path.join('media', 'avatars')
+        allowed_extensions = ['jpg', 'jpeg', 'png']
+        for ext in allowed_extensions:
+            avatar_path = os.path.join(avatar_dir, f'{user.id}.{ext}')
+            if os.path.isfile(avatar_path):
+                avatar_url = f'/media/avatars/{user.id}.{ext}'
+                break
+
+    return Response({
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'name': user.get_full_name(),
+        'avatar': avatar_url,
+        'detail': 'Profile updated successfully'
+    }, status=status.HTTP_200_OK)
+
+
 
 @api_view(['POST'])
 def request_group_access(request):

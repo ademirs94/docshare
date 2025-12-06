@@ -22,6 +22,25 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 
+
+def order_members_with_owner_first(members_list, group):
+    """Ordena a lista de membros com o owner sempre em primeiro"""
+    members = list(members_list)
+    owner_member = None
+    
+    # Encontrar o owner
+    for member in members:
+        if member.user == group.created_by:
+            owner_member = member
+            break
+    
+    # Se encontrou o owner, coloca-o em primeiro
+    if owner_member:
+        members.remove(owner_member)
+        members.insert(0, owner_member)
+    
+    return members
+
 @api_view(['POST'])
 def upload_document(request):
     # Obtém o user_id, group_id e shared_with_user_id do formulário
@@ -423,6 +442,7 @@ def create_group(request):
 
     # Construir resposta com membros e roles
     members_list = GroupMember.objects.filter(group=group).select_related('user')
+    ordered_members = order_members_with_owner_first(members_list, group)
     
     return Response({
         'id': group.id,
@@ -432,13 +452,13 @@ def create_group(request):
         'image': image_path,
         'created_by': group.created_by.username,
         'created_date': group.created_date,
-        'members_count': members_list.count(),
+        'members_count': len(ordered_members),
         'membersList': [{
             'id': gm.user.id, 
             'username': gm.user.username, 
             'name': gm.user.get_full_name(),
             'role': gm.role
-        } for gm in members_list],
+        } for gm in ordered_members],
         'isAdmin': True
     }, status=status.HTTP_201_CREATED)
 
@@ -457,6 +477,7 @@ def get_groups(request, user_id):
     data = []
     for group in all_groups:
         memberList = GroupMember.objects.filter(group=group).select_related('user')
+        ordered_members = order_members_with_owner_first(memberList, group)
         image_url = None
         if group.image:
             # Construir URL completa da imagem
@@ -477,14 +498,14 @@ def get_groups(request, user_id):
             'image': image_url,
             'createdBy': group.created_by.username,
             'createdDate': group.created_date.isoformat(),
-            'members_count': memberList.count(),
+            'members_count': len(ordered_members),
             'memberList': [{
                 'id': gm.user.id,
                 'username': gm.user.username,
                 'email': gm.user.email,
                 'name': gm.user.get_full_name(),
                 'role': gm.role
-            } for gm in memberList],
+            } for gm in ordered_members],
             'isAdmin': is_admin
         })
     return Response(data, status=status.HTTP_200_OK)
@@ -737,9 +758,9 @@ def update_member_role(request, group_id):
     }, status=status.HTTP_200_OK)
 
 
-@api_view(['DELETE'])
-def remove_group_member(request, group_id):
-    """Remover um membro do grupo (admin ou o próprio utilizador)"""
+@api_view(['POST', 'DELETE'])
+def manage_group_member(request, group_id):
+    """Gerenciar membros do grupo - POST para adicionar, DELETE para remover"""
     user_id = request.data.get('user_id')
     member_id = request.data.get('member_id')
 
@@ -761,32 +782,141 @@ def remove_group_member(request, group_id):
     except User.DoesNotExist:
         return Response({'detail': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # ========== DELETE - Remover membro ==========
+    if request.method == 'DELETE':
+        """Remover um membro do grupo (admin ou o próprio utilizador)"""
+        try:
+            group_member = GroupMember.objects.get(group=group, user=member_user)
+        except GroupMember.DoesNotExist:
+            return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Evitar remover o owner do grupo
+        if group.created_by == member_user:
+            return Response({'detail': 'Cannot remove the group owner'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verificar permissões: user_id é admin OU user_id é o próprio membro a ser removido
+        is_admin = GroupMember.objects.filter(
+            group=group, 
+            user=user, 
+            role='admin'
+        ).exists() or group.created_by == user
+
+        is_removing_self = int(user_id) == int(member_id)
+
+        if not is_admin and not is_removing_self:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Remover o membro
+        group_member.delete()
+
+        return Response({
+            'detail': 'Member removed successfully',
+            'group_id': group.id,
+            'member_id': member_id
+        }, status=status.HTTP_200_OK)
+
+    # ========== POST - Adicionar membro ==========
+    elif request.method == 'POST':
+        """Adicionar um membro ao grupo (admin e moderador)"""
+        role = request.data.get('role', 'membro')  # role padrão é 'membro'
+
+        if role not in ['membro', 'admin', 'moderador']:
+            return Response({'detail': 'Invalid role'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verificar se o utilizador é admin ou moderador do grupo
+        user_group_member = GroupMember.objects.filter(
+            group=group, 
+            user=user
+        ).first()
+
+        is_admin = user_group_member and user_group_member.role == 'admin'
+        is_moderator = user_group_member and user_group_member.role == 'moderador'
+        is_owner = group.created_by == user
+
+        # Apenas admin, moderador ou owner podem adicionar membros
+        if not (is_admin or is_moderator or is_owner):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Verificar se o utilizador já é membro do grupo
+        if GroupMember.objects.filter(group=group, user=member_user).exists():
+            return Response({'detail': 'User is already a member of this group'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Criar o novo membro
+        group_member = GroupMember.objects.create(
+            group=group,
+            user=member_user,
+            role=role
+        )
+
+        return Response({
+            'id': group_member.id,
+            'user_id': group_member.user.id,
+            'username': group_member.user.username,
+            'email': group_member.user.email,
+            'name': group_member.user.get_full_name(),
+            'group_id': group_member.group.id,
+            'group_name': group_member.group.name,
+            'role': group_member.role,
+            'joined_date': group_member.joined_date.isoformat(),
+            'detail': 'Member added successfully'
+        }, status=status.HTTP_201_CREATED)
+
+    return Response({'detail': 'Invalid request method'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+@api_view(['GET'])
+def get_group_documents(request, group_id):
+    """Listar todos os documentos de um grupo"""
+    user_id = request.query_params.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        group_member = GroupMember.objects.get(group=group, user=member_user)
-    except GroupMember.DoesNotExist:
-        return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_404_NOT_FOUND)
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Evitar remover o owner do grupo
-    if group.created_by == member_user:
-        return Response({'detail': 'Cannot remove the group owner'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        group = Group.objects.get(id=group_id)
+    except Group.DoesNotExist:
+        return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Verificar permissões: user_id é admin OU user_id é o próprio membro a ser removido
-    is_admin = GroupMember.objects.filter(
-        group=group, 
-        user=user, 
-        role='admin'
-    ).exists() or group.created_by == user
+    # Verificar se o utilizador é membro do grupo
+    is_member = GroupMember.objects.filter(group=group, user=user).exists()
+    is_owner = group.created_by == user
 
-    is_removing_self = int(user_id) == int(member_id)
+    if not is_member and not is_owner:
+        return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_403_FORBIDDEN)
 
-    if not is_admin and not is_removing_self:
-        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    # Obter todos os documentos do grupo
+    documents = Document.objects.filter(shared_in_group=group).select_related('owner')
 
-    # Remover o membro
-    group_member.delete()
+    # Serializa os documentos com mesma estrutura de user_document_list
+    documents_data = [
+        {
+            'id': doc.id,
+            'filename': doc.filename,
+            'uploaded_at': doc.uploaded_at,
+            'owner': doc.owner.username,
+            'owner_id': doc.owner.id,
+            'is_owner': doc.owner == user,
+            'shared_in_group': {
+                'id': doc.shared_in_group.id,
+                'name': doc.shared_in_group.name
+            } if doc.shared_in_group else None,
+            'shared_with_user': {
+                'id': doc.shared_with_user.id,
+                'username': doc.shared_with_user.username,
+                'name': doc.shared_with_user.get_full_name()
+            } if doc.shared_with_user else None,
+        }
+        for doc in documents
+    ]
 
     return Response({
-        'detail': 'Member removed successfully',
-        'group_id': group.id,
-        'member_id': member_id
+        'group': group.name,
+        'documents': documents_data,
+        'count': len(documents_data)
     }, status=status.HTTP_200_OK)
+

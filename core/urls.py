@@ -4,7 +4,7 @@ from .views import (upload_document, signup, logout_view,
                     user_document_list, download_document,
                     login_view, verify_totp, setup_totp, delete_document,
                     create_group, get_groups, list_users, request_group_access, get_access_requests,
-                    respond_access_request, update_member_role, remove_group_member)
+                    respond_access_request, update_member_role, manage_group_member, get_group_documents)
 
 from django.contrib.auth import views as auth_views
 
@@ -28,6 +28,7 @@ urlpatterns = [
     path('groups/requests/<int:user_id>/', get_access_requests, name='get_access_requests'),
     path('groups/requests/<int:request_id>/respond/', respond_access_request, name='respond_access_request'),
     path('groups/<int:group_id>/members/role/', update_member_role, name='update_member_role'),
-    path('groups/<int:group_id>/member/', remove_group_member, name='remove_group_member'),
+    path('groups/<int:group_id>/member/', manage_group_member, name='manage_group_member'),
+    path('groups/<int:group_id>/documents/', get_group_documents, name='get_group_documents'),
 
 ]

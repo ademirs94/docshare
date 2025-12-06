@@ -1,8 +1,6 @@
 from django.shortcuts import redirect
 from docshare import settings
-from .forms import DocumentUploadForm
 from .models import Document, User, Group, GroupMember, RequestAccess
-from .forms import SignUpForm
 from django.contrib.auth import login, authenticate, logout
 from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
@@ -24,7 +22,6 @@ from rest_framework.decorators import api_view
 
 
 def order_members_with_owner_first(members_list, group):
-    """Ordena a lista de membros com o owner sempre em primeiro"""
     members = list(members_list)
     owner_member = None
     
@@ -43,7 +40,6 @@ def order_members_with_owner_first(members_list, group):
 
 
 def get_file_extension(filename):
-    """Extrai a extensão do ficheiro"""
     if '.' in filename:
         return filename.split('.')[-1].lower()
     return 'unknown'
@@ -132,8 +128,6 @@ def upload_document(request):
 
 @api_view(['POST'])
 def signup(request):
-    # if request.method == 'POST':
-    print(request.data)
     username = request.data.get('username')
     email = request.data.get('email')
     password = request.data.get('password')
@@ -157,7 +151,6 @@ def signup(request):
         first_name=first_name,
         last_name=last_name
     )
-    # user.generate_totp_secret()
     user.save()
 
     return Response({
@@ -168,13 +161,8 @@ def signup(request):
     }, status=status.HTTP_201_CREATED)
 
 
-def logout_view(request):
-    logout(request)
-    return redirect('login')
-
 @api_view(['POST'])
 def login_view(request):
-    # Com Django REST Framework, use request.data (funciona para JSON e form-data)
     username = request.data.get('username')
     password = request.data.get('password')
 
@@ -183,19 +171,11 @@ def login_view(request):
 
     user = authenticate(request, username=username, password=password)
     if user is not None:
-        request.session['pre_2fa_user_id'] = user.id
         return Response({
             'id': user.id,
             'requires2FA': bool(user.totp_secret),
         })
-        # return Response({
-        #     'id': user.id,
-        #     'username': user.username,
-        #     'name': user.first_name + ' ' + user.last_name,
-        #     'email': user.email,
-        # })
     return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-# ...existing code...
 
 @api_view(['POST'])
 def verify_totp(request):
@@ -213,7 +193,6 @@ def verify_totp(request):
 
     code = request.data.get('code')
     totp = pyotp.TOTP(user.totp_secret)
-    print(code)
     if totp.verify(code, valid_window=1):
         return Response({
             'id': user.id,
@@ -233,16 +212,12 @@ def setup_totp(request):
     if user_id:
         user = User.objects.get(id=user_id)
         if not user:
-            return redirect('login')
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if not user.totp_secret:
         user.generate_totp_secret()
 
     uri = user.get_totp_uri()
-
-    img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgImage)
-    buffer = BytesIO()
-    img.save(buffer)
 
     # Geração da imagem em PNG e conversão para base64
     qr = qrcode.make(uri)
@@ -412,13 +387,11 @@ def delete_document(request, document_id):
 
 @api_view(['POST'])
 def create_group(request):
-    """Criar um novo grupo"""
     user_id = request.POST.get('user_id')
     user = User.objects.get(id=user_id)
     if not user:
         return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
     
-    print(user_id)
     name = request.POST.get('name')
     description = request.POST.get('description', '')
     category = request.POST.get('category', '')
@@ -427,7 +400,6 @@ def create_group(request):
     if not name:
         return Response({'detail': 'Group name is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    print(name)
     image_path = None
     
     # Processar imagem se fornecida
@@ -442,7 +414,6 @@ def create_group(request):
             default_storage.save(image_path, image_file)
         except Exception as e:
             return Response({'detail': f'Error uploading image: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
-    print("image uploaded")
     # Criar grupo
     group = Group.objects.create(
         name=name,
@@ -484,7 +455,6 @@ def create_group(request):
 
 @api_view(['GET'])
 def get_groups(request, user_id):
-    """Listar todos os grupos com isAdmin baseado no user_id"""
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -532,7 +502,6 @@ def get_groups(request, user_id):
 
 @api_view(['GET'])
 def list_users(request):
-    """Listar todos os utilizadores"""
     users = User.objects.all()
 
     users_data = [
@@ -555,7 +524,6 @@ def list_users(request):
 
 @api_view(['GET'])
 def get_user_profile(request, user_id):
-    """Obter perfil do utilizador"""
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -584,7 +552,6 @@ def get_user_profile(request, user_id):
 
 @api_view(['PUT'])
 def update_user_profile(request):
-    """Atualizar perfil do utilizador: avatar, nomes e password"""
     user_id = request.data.get('user_id')
 
     if not user_id:
@@ -685,7 +652,6 @@ def update_user_profile(request):
 
 @api_view(['POST'])
 def request_group_access(request):
-    """Criar um pedido de acesso a um grupo"""
     user_id = request.data.get('user_id')
     group_id = request.data.get('group_id')
     message = request.data.get('message', '')
@@ -753,7 +719,6 @@ def request_group_access(request):
 
 @api_view(['GET'])
 def get_access_requests(request, user_id):
-    """Listar pedidos de acesso pendentes de todos os grupos onde o user é admin"""
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -850,7 +815,6 @@ def respond_access_request(request, request_id):
 
 @api_view(['PUT'])
 def update_member_role(request, group_id):
-    """Alterar a role de um membro do grupo"""
     user_id = request.data.get('user_id')
     member_id = request.data.get('member_id')
     new_role = request.data.get('role')
@@ -908,7 +872,6 @@ def update_member_role(request, group_id):
 
 @api_view(['POST', 'DELETE'])
 def manage_group_member(request, group_id):
-    """Gerenciar membros do grupo - POST para adicionar, DELETE para remover"""
     user_id = request.data.get('user_id')
     member_id = request.data.get('member_id')
 
@@ -932,7 +895,6 @@ def manage_group_member(request, group_id):
 
     # ========== DELETE - Remover membro ==========
     if request.method == 'DELETE':
-        """Remover um membro do grupo (admin ou o próprio utilizador)"""
         try:
             group_member = GroupMember.objects.get(group=group, user=member_user)
         except GroupMember.DoesNotExist:
@@ -1014,7 +976,6 @@ def manage_group_member(request, group_id):
 
 @api_view(['GET'])
 def get_group_documents(request, group_id):
-    """Listar todos os documentos de um grupo"""
     user_id = request.query_params.get('user_id')
     
     if not user_id:
@@ -1088,7 +1049,6 @@ def get_group_documents(request, group_id):
 
 @api_view(['GET'])
 def get_document(request, document_id):
-    """Obter informações de um documento pelo ID"""
     user_id = request.query_params.get('user_id')
     
     if not user_id:

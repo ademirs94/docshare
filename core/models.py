@@ -25,6 +25,7 @@ class Document(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     encrypted_file = models.FileField(upload_to='uploads_encrypted/')
     encrypted_key = models.BinaryField()
+    file_size = models.BigIntegerField(default=0)  # Tamanho do arquivo em bytes
     shared_in_group = models.ForeignKey('Group', on_delete=models.CASCADE, blank=True, null=True)
     shared_with_user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True, related_name='shared_documents')
 

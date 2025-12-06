@@ -4,7 +4,7 @@ from .views import (upload_document, signup, logout_view,
                     user_document_list, download_document,
                     login_view, verify_totp, setup_totp, delete_document,
                     create_group, get_groups, list_users, request_group_access, get_access_requests,
-                    respond_access_request, update_member_role, manage_group_member, get_group_documents)
+                    respond_access_request, update_member_role, manage_group_member, get_group_documents, get_document)
 
 from django.contrib.auth import views as auth_views
 
@@ -18,8 +18,8 @@ urlpatterns = [
     path('signup/', signup, name='signup'),
     path('logout/', logout_view, name='logout'),
     path('my-documents/', user_document_list, name='user_document_list'),
-    path('', user_document_list, name='user_document_list'),
     path('download/<int:document_id>/', download_document, name='download_document'),
+    path('document/<int:document_id>/', get_document, name='get_document'),
     path('document/delete/<int:document_id>/', delete_document, name='delete_document'),
     path('groups/create/', create_group, name='create_group'),
     path('groups/<int:user_id>/', get_groups, name='get_groups'),

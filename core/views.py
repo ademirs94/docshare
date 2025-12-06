@@ -41,6 +41,13 @@ def order_members_with_owner_first(members_list, group):
     
     return members
 
+
+def get_file_extension(filename):
+    """Extrai a extensão do ficheiro"""
+    if '.' in filename:
+        return filename.split('.')[-1].lower()
+    return 'unknown'
+
 @api_view(['POST'])
 def upload_document(request):
     # Obtém o user_id, group_id e shared_with_user_id do formulário
@@ -85,6 +92,7 @@ def upload_document(request):
         # Lê os dados do arquivo
         file_obj = request.FILES['file']
         file_data = file_obj.read()
+        file_size = len(file_data)  # Guarda o tamanho do arquivo em bytes
 
         # Encripta o arquivo
         key, encrypted = encrypt_file(file_data)
@@ -98,6 +106,7 @@ def upload_document(request):
             filename=file_obj.name,
             encrypted_file=None,
             encrypted_key=encrypted_key,
+            file_size=file_size,  # Guarda o tamanho do arquivo
             shared_in_group=group,  # Será None se não for partilhado com grupo
             shared_with_user=shared_with_user,  # Será None se não for partilhado com user
         )
@@ -114,6 +123,8 @@ def upload_document(request):
         return Response({
             'id': doc.id,
             'filename': doc.filename,
+            'file_size': doc.file_size,
+            'type': get_file_extension(doc.filename),
             'owner': doc.owner.username,
             'uploaded_at': doc.uploaded_at,
             'group_id': doc.shared_in_group.id if doc.shared_in_group else None,
@@ -281,6 +292,8 @@ def user_document_list(request):
             'id': doc.id,
             'filename': doc.filename,
             'uploaded_at': doc.uploaded_at,
+            'file_size': doc.file_size,
+            'type': get_file_extension(doc.filename),
             'owner': doc.owner.username,
             'owner_id': doc.owner.id,
             'is_owner': doc.owner == user,
@@ -898,6 +911,8 @@ def get_group_documents(request, group_id):
             'id': doc.id,
             'filename': doc.filename,
             'uploaded_at': doc.uploaded_at,
+            'file_size': doc.file_size,
+            'type': get_file_extension(doc.filename),
             'owner': doc.owner.username,
             'owner_id': doc.owner.id,
             'is_owner': doc.owner == user,
@@ -918,5 +933,65 @@ def get_group_documents(request, group_id):
         'group': group.name,
         'documents': documents_data,
         'count': len(documents_data)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_document(request, document_id):
+    """Obter informações de um documento pelo ID"""
+    user_id = request.query_params.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador tem acesso ao documento
+    # Pode ser: owner, shared_with_user, ou membro do grupo onde está partilhado
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+
+    if not has_access:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Retornar informações do documento
+    return Response({
+        'id': doc.id,
+        'filename': doc.filename,
+        'uploaded_at': doc.uploaded_at,
+        'file_size': doc.file_size,
+        'type': get_file_extension(doc.filename),
+        'owner': doc.owner.username,
+        'owner_id': doc.owner.id,
+        'is_owner': doc.owner == user,
+        'shared_in_group': {
+            'id': doc.shared_in_group.id,
+            'name': doc.shared_in_group.name
+        } if doc.shared_in_group else None,
+        'shared_with_user': {
+            'id': doc.shared_with_user.id,
+            'username': doc.shared_with_user.username,
+            'name': doc.shared_with_user.get_full_name()
+        } if doc.shared_with_user else None,
     }, status=status.HTTP_200_OK)
 

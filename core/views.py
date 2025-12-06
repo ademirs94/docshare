@@ -122,15 +122,6 @@ def upload_document(request):
 
         return Response({
             'id': doc.id,
-            'filename': doc.filename,
-            'file_size': doc.file_size,
-            'type': get_file_extension(doc.filename),
-            'owner': doc.owner.username,
-            'uploaded_at': doc.uploaded_at,
-            'group_id': doc.shared_in_group.id if doc.shared_in_group else None,
-            'group_name': doc.shared_in_group.name if doc.shared_in_group else None,
-            'shared_with_user_id': doc.shared_with_user.id if doc.shared_with_user else None,
-            'shared_with_user_name': doc.shared_with_user.username if doc.shared_with_user else None,
             'detail': 'File uploaded successfully'
         }, status=status.HTTP_201_CREATED)
 
@@ -294,6 +285,21 @@ def user_document_list(request):
             'uploaded_at': doc.uploaded_at,
             'file_size': doc.file_size,
             'type': get_file_extension(doc.filename),
+            'views': doc.views.count(),
+            'likes_count': doc.likes.count(),
+            'liked': doc.likes.filter(user=user).exists(),
+            'comments_count': doc.comments.count(),
+            'last_comments': [
+                {
+                    'id': comment.id,
+                    'content': comment.text,
+                    'user': comment.user.username,
+                    'author': comment.user.get_full_name(),
+                    'user_id': comment.user.id,
+                    'date': comment.created_at
+                }
+                for comment in doc.comments.all()[:3]
+            ],
             'owner': doc.owner.username,
             'owner_id': doc.owner.id,
             'is_owner': doc.owner == user,
@@ -1042,6 +1048,21 @@ def get_group_documents(request, group_id):
             'uploaded_at': doc.uploaded_at,
             'file_size': doc.file_size,
             'type': get_file_extension(doc.filename),
+            'views': doc.views.count(),
+            'likes_count': doc.likes.count(),
+            'liked': doc.likes.filter(user=user).exists(),
+            'comments_count': doc.comments.count(),
+            'last_comments': [
+                {
+                    'id': comment.id,
+                    'content': comment.text,
+                    'user': comment.user.username,
+                    'author': comment.user.get_full_name(),
+                    'user_id': comment.user.id,
+                    'date': comment.created_at
+                }
+                for comment in doc.comments.all()[:3]
+            ],
             'owner': doc.owner.username,
             'owner_id': doc.owner.id,
             'is_owner': doc.owner == user,
@@ -1110,6 +1131,21 @@ def get_document(request, document_id):
         'uploaded_at': doc.uploaded_at,
         'file_size': doc.file_size,
         'type': get_file_extension(doc.filename),
+        'views': doc.views.count(),
+        'likes_count': doc.likes.count(),
+        'liked': doc.likes.filter(user=user).exists(),
+        'comments_count': doc.comments.count(),
+        'last_comments': [
+                {
+                    'id': comment.id,
+                    'content': comment.text,
+                    'user': comment.user.username,
+                    'author': comment.user.get_full_name(),
+                    'user_id': comment.user.id,
+                    'date': comment.created_at
+                }
+                for comment in doc.comments.all()[:3]
+        ],
         'owner': doc.owner.username,
         'owner_id': doc.owner.id,
         'is_owner': doc.owner == user,
@@ -1122,5 +1158,259 @@ def get_document(request, document_id):
             'username': doc.shared_with_user.username,
             'name': doc.shared_with_user.get_full_name()
         } if doc.shared_with_user else None,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def add_document_view(request, document_id):
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import DocumentView
+    
+    user_id = request.data.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador tem acesso ao documento
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+
+    if not has_access:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Verificar se o utilizador já viu o documento nesta hora
+    now = timezone.now()
+    hour_start = now.replace(minute=0, second=0, microsecond=0)
+    hour_end = hour_start + timedelta(hours=1)
+    
+    view_this_hour = DocumentView.objects.filter(
+        document=doc,
+        user=user,
+        viewed_at__gte=hour_start,
+        viewed_at__lt=hour_end
+    ).first()
+    
+    if view_this_hour:
+        return Response({
+            'detail': 'User already viewed this document this hour',
+        }, status=status.HTTP_200_OK)
+    
+    # Registar a visualização
+    DocumentView.objects.create(
+        document=doc,
+        user=user
+    )
+
+    return Response({
+        'detail': 'View added successfully',
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def toggle_document_like(request, document_id):
+    from .models import Like
+    
+    user_id = request.data.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador tem acesso ao documento
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+
+    if not has_access:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Verificar se já tem like
+    like_exists = Like.objects.filter(document=doc, user=user).exists()
+    
+    if like_exists:
+        # Remover o like
+        Like.objects.filter(document=doc, user=user).delete()
+        return Response({
+            'detail': 'Like removed successfully',
+            'likes_count': doc.likes.count(),
+            'liked': False
+        }, status=status.HTTP_200_OK)
+    else:
+        # Adicionar o like
+        Like.objects.create(document=doc, user=user)
+        return Response({
+            'detail': 'Like added successfully',
+            'likes_count': doc.likes.count(),
+            'liked': True
+        }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def create_comment(request, document_id):
+    from .models import Comment
+    
+    user_id = request.data.get('user_id')
+    text = request.data.get('text')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not text:
+        return Response({'detail': 'Missing comment text'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if len(text.strip()) == 0:
+        return Response({'detail': 'Comment text cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador tem acesso ao documento
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+
+    if not has_access:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Criar o comentário
+    comment = Comment.objects.create(
+        document=doc,
+        user=user,
+        text=text.strip()
+    )
+
+    return Response({
+        'detail': 'Comment created successfully',
+        'comment': {
+            'id': comment.id,
+            'text': comment.text,
+            'user': comment.user.username,
+            'user_name': comment.user.get_full_name(),
+            'user_id': comment.user.id,
+            'created_at': comment.created_at,
+            'updated_at': comment.updated_at
+        },
+        'comments_count': doc.comments.count()
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def list_document_comments(request, document_id):
+    user_id = request.query_params.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o utilizador tem acesso ao documento
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+
+    if not has_access:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Obter todos os comentários do documento
+    comments = doc.comments.all()
+
+    # Serializar os comentários
+    comments_data = [
+        {
+            'id': comment.id,
+            'text': comment.text,
+            'user': comment.user.username,
+            'user_name': comment.user.get_full_name(),
+            'user_id': comment.user.id,
+            'created_at': comment.created_at,
+            'updated_at': comment.updated_at
+        }
+        for comment in comments
+    ]
+
+    return Response({
+        'document_id': doc.id,
+        'comments': comments_data,
+        'comments_count': len(comments_data)
     }, status=status.HTTP_200_OK)
 

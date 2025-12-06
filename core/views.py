@@ -302,19 +302,26 @@ def download_document(request, document_id):
     encrypted = request.query_params.get('encrypted', 'false').lower() == 'true'
 
     try:
-        doc = Document.objects.get(id=document_id, owner=user)
+        doc = Document.objects.get(id=document_id)
+
     except Document.DoesNotExist:
         return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Verificar se o user tem acesso (owner ou shared_with_user)
+    if doc.owner != user and doc.shared_with_user != user:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
     try:
+        path = f'uploads_encrypted/doc_{doc.id}.bin'
+
         # Ler o ficheiro encriptado
-        with open(doc.encrypted_file.path, 'rb') as f:
+        with open(path, 'rb') as f:
             encrypted_data = f.read()
 
         if encrypted:
             # Retorna o ficheiro encriptado
             response = HttpResponse(encrypted_data, content_type='application/octet-stream')
-            response['Content-Disposition'] = f'attachment; filename="{doc.filename}.encrypted"'
+            response['Content-Disposition'] = f'attachment; filename="{doc.filename}.bin"'
         else:
             # Desencriptar a chave AES do documento
             aes_key = decrypt_key(doc.encrypted_key, settings.MASTER_KEY)
@@ -342,14 +349,19 @@ def delete_document(request, document_id):
         return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        doc = Document.objects.get(id=document_id, owner=user)
+        doc = Document.objects.get(id=document_id)
     except Document.DoesNotExist:
         return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Verificar se o user é o owner do documento
+    if doc.owner != user:
+        return Response({'detail': 'Permission denied. Only the owner can delete this document.'}, status=status.HTTP_403_FORBIDDEN)
+
     try:
         # Remove o ficheiro encriptado do disco
-        if doc.encrypted_file and os.path.isfile(doc.encrypted_file.path):
-            os.remove(doc.encrypted_file.path)
+        path = f'uploads_encrypted/doc_{doc.id}.bin'
+        if os.path.isfile(path):
+            os.remove(path)
 
         # Remove o documento da base de dados
         doc.delete()

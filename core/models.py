@@ -29,6 +29,9 @@ class Document(models.Model):
     shared_in_group = models.ForeignKey('Group', on_delete=models.CASCADE, blank=True, null=True)
     shared_with_user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True, related_name='shared_documents')
 
+    class Meta:
+        ordering = ['-uploaded_at']
+
 class Group(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
@@ -79,3 +82,42 @@ class RequestAccess(models.Model):
 
     def __str__(self):
         return f'{self.user.username} - {self.group.name} ({self.status})'
+
+
+class Like(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='document_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('document', 'user')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.user.username} - {self.document.filename}'
+
+
+class Comment(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='comments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='document_comments')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.user.username} - {self.document.filename}'
+
+
+class DocumentView(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='views')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='document_views')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+
+    def __str__(self):
+        return f'{self.user.username} - {self.document.filename}'

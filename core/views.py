@@ -1,7 +1,6 @@
-from django.shortcuts import redirect
 from docshare import settings
 from .models import Document, User, Group, GroupMember, RequestAccess
-from django.contrib.auth import login, authenticate, logout
+from django.contrib.auth import authenticate
 from django.http import HttpResponse
 from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
 from django.db.models import Q
@@ -59,7 +58,6 @@ def upload_document(request):
     if not user_id:
         return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = None
     group = None
     shared_with_user = None
 
@@ -73,6 +71,13 @@ def upload_document(request):
             group = Group.objects.get(id=group_id)
         except Group.DoesNotExist:
             return Response({'detail': 'Group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Verificar se o user é membro do grupo ou é o owner
+        is_member = GroupMember.objects.filter(group=group, user=user).exists()
+        is_owner = group.created_by == user
+
+        if not is_member and not is_owner:
+            return Response({'detail': 'User is not a member of this group'}, status=status.HTTP_403_FORBIDDEN)
 
     if shared_with_user_id:
         try:

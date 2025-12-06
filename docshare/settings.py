@@ -32,8 +32,6 @@ ALLOWED_HOSTS = []
 AUTH_USER_MODEL = 'core.User'
 MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = '/media/'
-LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/upload/'
 MASTER_KEY = b"\x98=\xe6\xee\xe6w> '\x9c\xbf\x8dqL\xfc\xbe\x14\xc2\x85\x00\xfd\xb5!\xe9\xdd\x1b\xa6z\xdc\xa9M$"
 
 
@@ -51,7 +49,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -78,7 +75,7 @@ ROOT_URLCONF = 'docshare.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'core', 'templates')],
+        'DIRS': [],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

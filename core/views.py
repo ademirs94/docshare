@@ -6,7 +6,6 @@ from .utils import decrypt_file, decrypt_key, encrypt_key, encrypt_file
 from django.db.models import Q
 import pyotp
 import qrcode
-import qrcode.image.svg
 from io import BytesIO
 import base64
 import os
@@ -498,7 +497,8 @@ def get_groups(request, user_id):
                 'username': gm.user.username,
                 'email': gm.user.email,
                 'name': gm.user.get_full_name(),
-                'role': gm.role
+                'role': gm.role,
+                'avatar': gm.user.get_avatar()
             } for gm in ordered_members],
             'isAdmin': is_admin
         })
@@ -1377,5 +1377,54 @@ def list_document_comments(request, document_id):
         'document_id': doc.id,
         'comments': comments_data,
         'comments_count': len(comments_data)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+def remove_document_from_group(request, document_id):
+    user_id = request.data.get('user_id')
+    
+    if not user_id:
+        return Response({'detail': 'Missing user_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verificar se o documento está associado a um grupo
+    if not doc.shared_in_group:
+        return Response({'detail': 'Document is not associated with any group'}, status=status.HTTP_400_BAD_REQUEST)
+
+    group = doc.shared_in_group
+
+    # Verificar se o utilizador é o owner do documento ou admin/moderador do grupo
+    is_doc_owner = doc.owner == user
+    is_group_owner = group.created_by == user
+    
+    # Verificar se é admin ou moderador do grupo
+    is_admin_or_mod = GroupMember.objects.filter(
+        group=group,
+        user=user,
+        role__in=['admin', 'moderador']
+    ).exists()
+
+    if not is_doc_owner and not is_group_owner and not is_admin_or_mod:
+        return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Remover a associação do documento ao grupo
+    doc.shared_in_group = None
+    doc.save()
+
+    return Response({
+        'detail': 'Document removed from group successfully',
+        'document_id': doc.id,
+        'filename': doc.filename,
+        'shared_in_group': None
     }, status=status.HTTP_200_OK)
 

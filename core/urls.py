@@ -4,7 +4,7 @@ from .views import (upload_document, signup,
                     user_document_list, download_document,
                     login_view, verify_totp, setup_totp, delete_document,
                     create_group, get_groups, list_users, update_user_profile, get_user_profile, request_group_access, get_access_requests,
-                    respond_access_request, update_member_role, manage_group_member, get_group_documents, get_document, add_document_view, toggle_document_like, create_comment, list_document_comments)
+                    respond_access_request, update_member_role, manage_group_member, get_group_documents, get_document, add_document_view, toggle_document_like, create_comment, list_document_comments, remove_document_from_group)
 
 from django.contrib.auth import views as auth_views
 
@@ -21,6 +21,7 @@ urlpatterns = [
     path('document/<int:document_id>/like/', toggle_document_like, name='toggle_document_like'),
     path('document/<int:document_id>/comment/', create_comment, name='create_comment'),
     path('document/<int:document_id>/comments/', list_document_comments, name='list_document_comments'),
+    path('document/<int:document_id>/remove-from-group/', remove_document_from_group, name='remove_document_from_group'),
     path('document/delete/<int:document_id>/', delete_document, name='delete_document'),
     path('groups/create/', create_group, name='create_group'),
     path('groups/<int:user_id>/', get_groups, name='get_groups'),

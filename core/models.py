@@ -1,3 +1,4 @@
+import os
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 import pyotp
@@ -18,6 +19,17 @@ class User(AbstractUser):
         if not self.totp_secret:
             self.totp_secret = pyotp.random_base32()
             self.save()
+
+    def get_avatar(self):
+        avatar_url = None
+        avatar_dir = os.path.join('media', 'avatars')
+        allowed_extensions = ['jpg', 'jpeg', 'png']
+        for ext in allowed_extensions:
+            avatar_path = os.path.join(avatar_dir, f'{self.id}.{ext}')
+            if os.path.isfile(avatar_path):
+                avatar_url = f'/media/avatars/{self.id}.{ext}'
+                break
+        return avatar_url
 
 class Document(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE)

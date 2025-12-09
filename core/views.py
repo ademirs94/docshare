@@ -324,8 +324,23 @@ def download_document(request, document_id):
     except Document.DoesNotExist:
         return Response({'detail': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Verificar se o user tem acesso (owner ou shared_with_user)
-    if doc.owner != user and doc.shared_with_user != user:
+    # Verificar se o user tem acesso (owner ou shared_with_user ou membro do grupo)
+    has_access = False
+    
+    if doc.owner == user:
+        has_access = True
+    elif doc.shared_with_user == user:
+        has_access = True
+    elif doc.shared_in_group:
+        # Verificar se é membro do grupo
+        is_member = GroupMember.objects.filter(
+            group=doc.shared_in_group,
+            user=user
+        ).exists() or doc.shared_in_group.created_by == user
+        if is_member:
+            has_access = True
+    
+    if not has_access:
         return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
     try:

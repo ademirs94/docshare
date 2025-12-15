@@ -113,6 +113,9 @@ def upload_document(request):
 
         # Salva o arquivo encriptado no disco
         path = f'uploads_encrypted/doc_{doc.id}.bin'
+
+        os.makedirs('uploads_encrypted', exist_ok=True)
+
         with open(path, 'wb') as f:
             f.write(encrypted)
 
